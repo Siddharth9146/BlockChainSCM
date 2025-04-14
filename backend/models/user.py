@@ -3,8 +3,9 @@ from datetime import datetime
 from typing import Optional
 
 class User(BaseModel):
-    name: str
-    email: EmailStr
+    username: str
     password_hash: str
-    role: str  # producer, distributor, retailer, regulator, consumer
-    registered_at: Optional[datetime] = datetime.utcnow()
+    role: str  # Producer, Distributor, Retailer, Regulator, Consumer
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    registered_at: Optional[datetime] = None

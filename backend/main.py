@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from passlib.context import CryptContext
 from web3 import Web3
 import json
@@ -15,7 +15,7 @@ from models.user import User
 from models.product import Product
 from models.transaction import Transaction
 from models.role_permission import RolePermission
-from db import users_collection, products_collection, transactions_collection
+from db import users_collection, products_collection, transactions_collection, roles_permissions_collection
 
 # Load environment variables
 config = dotenv_values("../.env")
@@ -45,17 +45,21 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
 
 # Load and compile the smart contract (in production, would use the deployed ABI)
-with open("../contracts/SupplyChain.json") as f:
-    contract_json = json.load(f)
-
-contract_abi = contract_json["abi"]
-contract_address = contract_json.get("networks", {}).get("5777", {}).get("address")
-
-if not contract_address:
-    print("Warning: Contract address not found in JSON. Using placeholder.")
-    contract_address = "0x0000000000000000000000000000000000000000"  # Placeholder
-
-contract = w3.eth.contract(address=contract_address, abi=contract_abi)
+try:
+    with open("../contracts/SupplyChain.json") as f:
+        contract_json = json.load(f)
+    
+    contract_abi = contract_json["abi"]
+    contract_address = contract_json.get("networks", {}).get("5777", {}).get("address")
+    
+    if not contract_address:
+        print("Warning: Contract address not found in JSON. Using placeholder.")
+        contract_address = "0x0000000000000000000000000000000000000000"  # Placeholder
+    
+    contract = w3.eth.contract(address=contract_address, abi=contract_abi)
+except Exception as e:
+    print(f"Warning: Unable to load contract: {str(e)}")
+    contract = None
 
 # Authentication functions
 def verify_password(plain_password, hashed_password):
@@ -79,20 +83,20 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
+        username: str = payload.get("sub")
+        if username is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
     
-    user = users_collection.find_one({"email": email})
+    user = users_collection.find_one({"username": username})
     if user is None:
         raise credentials_exception
     return user
 
 # Role-based access control
 def has_permission(user, required_permission):
-    user_role = user.get("role")
+    user_role = user.get("role").lower()
     role_permissions = roles_permissions_collection.find_one({"role": user_role})
     if not role_permissions:
         return False
@@ -100,21 +104,26 @@ def has_permission(user, required_permission):
 
 # Authentication endpoints
 @app.post("/register", status_code=status.HTTP_201_CREATED)
-async def register_user(user: User = Body(...)):
+async def register_user(user_data: Dict[str, Any] = Body(...)):
     # Check if user already exists
-    if users_collection.find_one({"email": user.email}):
+    if users_collection.find_one({"username": user_data["username"]}):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="Username already registered"
         )
     
     # Hash the password
-    hashed_password = get_password_hash(user.password_hash)
+    hashed_password = get_password_hash(user_data["password"])
     
     # Create user with hashed password
-    user_dict = user.dict()
-    user_dict["password_hash"] = hashed_password
-    user_dict["registered_at"] = datetime.utcnow()
+    user_dict = {
+        "username": user_data["username"],
+        "password_hash": hashed_password,
+        "role": user_data["role"],
+        "phone": user_data.get("phone", ""),
+        "email": user_data.get("email", ""),
+        "registered_at": datetime.utcnow()
+    }
     
     # Insert user into database
     result = users_collection.insert_one(user_dict)
@@ -123,73 +132,147 @@ async def register_user(user: User = Body(...)):
 
 @app.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = users_collection.find_one({"email": form_data.username})
+    user = users_collection.find_one({"username": form_data.username})
     if not user or not verify_password(form_data.password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["email"]}, expires_delta=access_token_expires
+        data={"sub": user["username"], "role": user["role"]}, 
+        expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "role": user["role"]
+    }
+
+@app.post("/login", status_code=status.HTTP_200_OK)
+async def login(username: str = Body(...), password: str = Body(...)):
+    user = users_collection.find_one({"username": username})
+    if not user or not verify_password(password, user["password_hash"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password"
+        )
+    
+    return {
+        "success": True,
+        "user_id": str(user["_id"]),
+        "role": user["role"],
+        "username": user["username"]
+    }
 
 # Product endpoints
 @app.post("/product", status_code=status.HTTP_201_CREATED)
-async def add_product(product: Product = Body(...), current_user: dict = Depends(get_current_user)):
+async def add_product(product_data: Dict[str, Any] = Body(...), current_user: dict = Depends(get_current_user)):
     # Check if user has permission to add product
-    if not has_permission(current_user, "add_product"):
+    if current_user["role"].lower() != "producer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to add products"
+            detail="Only producers can add products"
         )
+    
+    # Generate product ID if not provided
+    if "productId" not in product_data:
+        product_data["productId"] = f"PROD-{datetime.utcnow().timestamp():.0f}"
     
     # Add product to blockchain
     try:
-        # Get an address with funds from Ganache
-        account = w3.eth.accounts[0]
+        if contract:
+            # Get an address with funds from Ganache
+            account = w3.eth.accounts[0]
+            
+            # Execute contract function
+            tx_hash = contract.functions.addProduct(
+                product_data["productId"],
+                product_data["name"],
+                current_user["username"]
+            ).transact({'from': account})
+            
+            # Wait for transaction receipt
+            tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+            
+            blockchain_tx = tx_hash.hex()
+        else:
+            blockchain_tx = "mock-tx-hash-contract-not-available"
         
-        # Execute contract function
-        tx_hash = contract.functions.addProduct(
-            product.productId,
-            product.name,
-            current_user["email"]  # Producer email as initial owner
-        ).transact({'from': account})
-        
-        # Wait for transaction receipt
-        tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
-        
-        # If successful, also save product metadata to MongoDB
-        product_dict = product.dict()
-        product_dict["current_owner"] = current_user["email"]
-        product_dict["last_updated"] = datetime.utcnow()
+        # Save product metadata to MongoDB
+        product_dict = {
+            "productId": product_data["productId"],
+            "name": product_data["name"],
+            "description": product_data.get("description", ""),
+            "category": product_data.get("category", ""),
+            "quantity": product_data.get("quantity", 1),
+            "location": product_data.get("location", ""),
+            "date_created": product_data.get("date", datetime.utcnow().strftime("%Y-%m-%d")),
+            "image_url": product_data.get("image_url", ""),
+            "current_owner": current_user["username"],
+            "status": "Produced",
+            "last_updated": datetime.utcnow()
+        }
         
         result = products_collection.insert_one(product_dict)
         
         # Create initial transaction record
-        transaction = Transaction(
-            productId=product.productId,
-            from_user=current_user["email"],
-            to_user=current_user["email"],
-            action="created",
-            note="Product created and registered"
-        )
+        transaction = {
+            "productId": product_data["productId"],
+            "from_user": current_user["username"],
+            "to_user": current_user["username"],
+            "timestamp": datetime.utcnow(),
+            "action": "created",
+            "note": "Product created and registered"
+        }
         
-        transactions_collection.insert_one(transaction.dict())
+        transactions_collection.insert_one(transaction)
         
         return {
+            "success": True,
             "message": "Product added successfully",
-            "product_id": product.productId,
-            "tx_hash": tx_hash.hex()
+            "product_id": product_data["productId"],
+            "tx_hash": blockchain_tx
         }
     
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to add product to blockchain: {str(e)}"
+            detail=f"Failed to add product: {str(e)}"
+        )
+
+@app.post("/distributor", status_code=status.HTTP_201_CREATED)
+async def add_distributor(distributor_data: Dict[str, Any] = Body(...), current_user: dict = Depends(get_current_user)):
+    # Check if user has permission to add distributor
+    if current_user["role"].lower() != "producer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only producers can add distributors"
+        )
+    
+    try:
+        # Create a distributor record
+        distributor = {
+            "id": distributor_data["id"],
+            "name": distributor_data["name"],
+            "created_by": current_user["username"],
+            "created_at": datetime.utcnow()
+        }
+        
+        result = db.distributors.insert_one(distributor)
+        
+        return {
+            "success": True,
+            "message": f"Distributor '{distributor_data['name']}' added successfully",
+            "distributor_id": distributor_data["id"]
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add distributor: {str(e)}"
         )
 
 @app.put("/product/{product_id}")
@@ -198,14 +281,7 @@ async def update_product(
     update_data: dict = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
-    # Check if user has permission to update product
-    if not has_permission(current_user, "update_product"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to update products"
-        )
-    
-    # Check if product exists
+    # Check product exists
     product = products_collection.find_one({"productId": product_id})
     if not product:
         raise HTTPException(
@@ -213,57 +289,56 @@ async def update_product(
             detail="Product not found"
         )
     
-    # Update product on blockchain
+    # Update product on blockchain and in database
     try:
-        # Get an address with funds from Ganache
-        account = w3.eth.accounts[0]
-        
-        # If ownership transfer
-        new_owner = update_data.get("new_owner")
-        if new_owner:
-            # Execute contract function to transfer ownership
-            tx_hash = contract.functions.transferProduct(
-                product_id,
-                new_owner,
-                update_data.get("status", "Transferred")
-            ).transact({'from': account})
+        if contract:
+            # Get an address with funds from Ganache
+            account = w3.eth.accounts[0]
             
-            # Create transaction record
-            transaction = Transaction(
-                productId=product_id,
-                from_user=product["current_owner"],
-                to_user=new_owner,
-                action="transferred",
-                note=update_data.get("note", "")
-            )
-            
-            transactions_collection.insert_one(transaction.dict())
-            
-            # Update MongoDB record
-            update_data["current_owner"] = new_owner
+            # If ownership transfer
+            new_owner = update_data.get("new_owner")
+            if new_owner:
+                # Execute contract function to transfer ownership
+                tx_hash = contract.functions.transferProduct(
+                    product_id,
+                    new_owner,
+                    update_data.get("status", "Transferred")
+                ).transact({'from': account})
+                
+                blockchain_tx = tx_hash.hex()
+            else:
+                # Just update status
+                tx_hash = contract.functions.updateProductStatus(
+                    product_id,
+                    update_data.get("status", "Updated")
+                ).transact({'from': account})
+                
+                blockchain_tx = tx_hash.hex()
         else:
-            # Just update status
-            tx_hash = contract.functions.updateProductStatus(
-                product_id,
-                update_data.get("status", "Updated")
-            ).transact({'from': account})
-            
-            # Create transaction record
-            transaction = Transaction(
-                productId=product_id,
-                from_user=current_user["email"],
-                to_user=product["current_owner"],
-                action="updated",
-                note=update_data.get("note", "")
-            )
-            
-            transactions_collection.insert_one(transaction.dict())
+            blockchain_tx = "mock-tx-hash-contract-not-available"
         
-        # Wait for transaction receipt
-        tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        # Create transaction record
+        transaction = {
+            "productId": product_id,
+            "from_user": product["current_owner"],
+            "to_user": update_data.get("new_owner", product["current_owner"]),
+            "timestamp": datetime.utcnow(),
+            "action": "transferred" if update_data.get("new_owner") else "updated",
+            "note": update_data.get("note", "")
+        }
+        
+        transactions_collection.insert_one(transaction)
         
         # Update timestamp
         update_data["last_updated"] = datetime.utcnow()
+        
+        # For distributor location updates
+        if "new_location" in update_data:
+            update_data["location"] = update_data.pop("new_location")
+        
+        # If ownership transfer
+        if "new_owner" in update_data:
+            update_data["current_owner"] = update_data.pop("new_owner")
         
         # Update MongoDB record
         products_collection.update_one(
@@ -272,21 +347,27 @@ async def update_product(
         )
         
         return {
+            "success": True,
             "message": "Product updated successfully",
-            "tx_hash": tx_hash.hex()
+            "tx_hash": blockchain_tx
         }
     
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update product on blockchain: {str(e)}"
+            detail=f"Failed to update product: {str(e)}"
         )
 
 @app.get("/product/{product_id}")
 async def get_product(product_id: str):
     try:
         # Get product data from blockchain
-        blockchain_data = contract.functions.getProduct(product_id).call()
+        blockchain_data = None
+        if contract:
+            try:
+                blockchain_data = contract.functions.getProduct(product_id).call()
+            except Exception as e:
+                print(f"Warning: Could not fetch blockchain data: {str(e)}")
         
         # Get detailed metadata from MongoDB
         product = products_collection.find_one({"productId": product_id})
@@ -296,14 +377,21 @@ async def get_product(product_id: str):
                 detail="Product not found in database"
             )
         
+        # Convert ObjectId to string for JSON serialization
+        product["_id"] = str(product["_id"])
+        
         # Get transaction history
         transactions = list(transactions_collection.find(
-            {"productId": product_id},
-            {"_id": 0}  # Exclude the MongoDB _id from results
+            {"productId": product_id}
         ))
+        
+        # Convert ObjectId to string in each transaction
+        for txn in transactions:
+            txn["_id"] = str(txn["_id"])
         
         # Combine blockchain and database data
         return {
+            "success": True,
             "product": product,
             "blockchain_data": blockchain_data,
             "transaction_history": transactions
@@ -317,32 +405,107 @@ async def get_product(product_id: str):
 
 @app.get("/products")
 async def get_products(current_user: dict = Depends(get_current_user)):
-    # If user is a producer, return their products
-    # If user is a distributor or retailer, return products they're involved with
-    # If user is a regulator, return all products
+    try:
+        # Determine which products to return based on role
+        role = current_user["role"].lower()
+        
+        if role == "regulator":
+            # Regulators can see all products
+            products_cursor = products_collection.find({})
+        elif role == "producer":
+            # Producers can see products they created
+            products_cursor = products_collection.find({"current_owner": current_user["username"]})
+        elif role in ["distributor", "retailer"]:
+            # Distributors and retailers can see products assigned to them
+            products_cursor = products_collection.find({"current_owner": current_user["username"]})
+        else:  # Consumer
+            # Consumers can see all products but with limited info
+            products_cursor = products_collection.find({})
+        
+        # Convert to list and clean for JSON serialization
+        products = []
+        for product in products_cursor:
+            product["_id"] = str(product["_id"])
+            products.append(product)
+        
+        return {
+            "success": True,
+            "products": products
+        }
     
-    if current_user["role"] == "regulator":
-        products = list(products_collection.find({}, {"_id": 0}))
-    elif current_user["role"] in ["producer", "distributor", "retailer"]:
-        products = list(products_collection.find({"current_owner": current_user["email"]}, {"_id": 0}))
-    else:  # Consumer
-        products = list(products_collection.find({}, {"_id": 0}).limit(10))  # Limited view
-    
-    return {"products": products}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve products: {str(e)}"
+        )
 
-# Transaction endpoints
 @app.get("/transactions/{product_id}")
-async def get_product_transactions(product_id: str, current_user: dict = Depends(get_current_user)):
-    transactions = list(transactions_collection.find(
-        {"productId": product_id},
-        {"_id": 0}
-    ))
+async def get_product_transactions(product_id: str):
+    try:
+        # Get transaction history from MongoDB
+        transactions_cursor = transactions_collection.find({"productId": product_id})
+        
+        # Convert to list and clean for JSON serialization
+        transactions = []
+        for txn in transactions_cursor:
+            txn["_id"] = str(txn["_id"])
+            transactions.append(txn)
+        
+        return {
+            "success": True,
+            "transactions": transactions
+        }
     
-    return {"transactions": transactions}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve transactions: {str(e)}"
+        )
+
+@app.get("/trace/{product_id}")
+async def get_product_trace(product_id: str):
+    try:
+        # Get product details
+        product = products_collection.find_one({"productId": product_id})
+        if not product:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found"
+            )
+        
+        # Convert ObjectId to string
+        product["_id"] = str(product["_id"])
+        
+        # Get complete transaction history
+        transactions = list(transactions_collection.find({"productId": product_id}))
+        
+        # Clean transactions for JSON serialization
+        for txn in transactions:
+            txn["_id"] = str(txn["_id"])
+        
+        # Format trace information
+        trace = {
+            "product": product,
+            "history": transactions,
+            "origin": transactions[0]["from_user"] if transactions else None,
+            "current_location": product.get("location", "Unknown"),
+            "roles_involved": list(set([txn["from_user"] for txn in transactions] + [txn["to_user"] for txn in transactions]))
+        }
+        
+        return {
+            "success": True,
+            "trace": trace
+        }
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve product trace: {str(e)}"
+        )
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the Supply Chain Traceability API"}
+    return {"message": "Welcome to the Supply Chain Traceability API", "version": "1.0.0"}
 
 if __name__ == "__main__":
     import uvicorn
