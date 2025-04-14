@@ -3,10 +3,12 @@ import streamlit as st
 from datetime import date
 from utils import add_product, add_distributor, view_products
 
+
 API_URL = "http://127.0.0.1:8000"  # Make sure the API URL is correct
 
 def producer_ui():
     st.header("👨‍🌾 Producer Dashboard")
+
 
    
     action = st.selectbox("Choose an action", ["Add Product", "Add Distributor", "My Products List", "View Products"])
@@ -38,8 +40,13 @@ def producer_ui():
                     'date': str(today),
                     'image_url': image_url,
                 }
+
+                access_token = st.session_state.get("access_token")
+                if not access_token:
+                    st.error("You need to log in first.")
+                    return
                 headers = {
-                    "Authorization": f"Bearer {token}"
+                    "Authorization": f"Bearer {access_token}"
                 }
                 response = requests.post(f"{API_URL}/product", json=payload, headers=headers)
 

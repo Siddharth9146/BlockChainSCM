@@ -23,6 +23,7 @@ SECRET_KEY = config.get("SECRET_KEY", "your-secret-key")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
+
 # Setup FastAPI
 app = FastAPI(title="Supply Chain Traceability API")
 
@@ -42,7 +43,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Web3 setup - connect to local Ganache instance
-w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:7545"))
 
 # Load and compile the smart contract (in production, would use the deployed ABI)
 try:
@@ -165,12 +166,15 @@ async def login(username: str = Body(...), password: str = Body(...)):
         "user_id": str(user["_id"]),
         "role": user["role"],
         "username": user["username"]
+
+        
     }
 
 # Product endpoints
 @app.post("/product", status_code=status.HTTP_201_CREATED)
 async def add_product(product_data: Dict[str, Any] = Body(...), current_user: dict = Depends(get_current_user)):
     # Check if user has permission to add product
+    
     
     
     # Generate product ID if not provided
@@ -188,9 +192,6 @@ async def add_product(product_data: Dict[str, Any] = Body(...), current_user: di
                 product_data["productId"],
                 product_data["name"],
                 current_user["username"],
-                product_data["quantity"],
-                product_data["batch_id"],
-                product_data["date_created"]
             ).transact({'from': account})
             
             # Wait for transaction receipt

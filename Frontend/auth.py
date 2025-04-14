@@ -13,7 +13,6 @@ def login():
     if st.button("Login"):
         # Call the backend login API
         response = requests.post(f"{API_URL}/login", json={"username": username, "password": password})
-
         # Debugging: Check if we got a response
         st.write("Response status code:", response.status_code)
         st.write("Response data:", response.json())
@@ -24,16 +23,41 @@ def login():
 
             if response_data.get("success"):
                 # Parse the necessary info
+                token = requests.post(
+                    f"{API_URL}/token",
+                    data={"username": username, "password": password},
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+
+                token_data = token.json()
+
+                if token.status_code != 200:
+                    st.error("Failed to retrieve access token.")
+                    return
+                
+               
+                st.write("Token status code:", token.status_code)
+                st.write("Token data:", token_data)  # Show the full token response for debugging
+                # Check if token retrieval was successful
+                if "access_token" not in token_data:
+                    st.error("Failed to retrieve access token.")
+                    return
+                # Extract user information
+
+
                 user_id = response_data.get("user_id")
+                access_token = response_data.get("access_token")
                 role = response_data.get("role")
+                access_token = token_data.get("access_token")
                 username = response_data.get("username")
 
                 # Store necessary information in session state
+                st.session_state["access_token"] = access_token
                 st.session_state["user_id"] = user_id
                 st.session_state["role"] = role
                 st.session_state["username"] = username
                 st.session_state["login_success"] = True  # Mark login as successful
-
+                st.session_state["access_token"] = access_token # Store access token
                 st.success(f"Logged in successfully as {username}!")  # Show login success message
 
                 # Rerun the app to show role-specific page
@@ -42,6 +66,9 @@ def login():
                 st.error("Login failed. Invalid username or password.")
         else:
             st.error("Login failed. Server error.")
+
+    if st.button("Dont have an account? Sign Up"):
+        st.session_state["show_signup"] = True
 
 def producer_page():
     producer_ui()  # Display producer UI
@@ -79,22 +106,6 @@ def display_role_page():
     else:
         st.error("Unknown role")
 
-def main():
-    # Debugging: Check session state and flow
-    # st.write("### Debug: In main()")
-    # st.write(f"Session state before check: {st.session_state}")  # Show session state for debugging
-
-    if "login_success" in st.session_state and st.session_state["login_success"]:
-        # If user is logged in, show the role-specific page
-        st.write("login success processing in main")
-        display_role_page()
-    else:
-        # If not logged in, show the login page
-        login()
-
-if __name__ == "__main__":
-    main()
-# Sign Up Function
 def signup():
     st.title("📝 Sign Up")
 
@@ -125,3 +136,26 @@ def signup():
                 st.error(f"❌ {response.json().get('detail', 'Registration failed.')}")
             except Exception:
                 st.error("❌ Registration failed. Invalid server response.")
+                
+    if st.button("Already have an account? Login"):
+        st.session_state["show_signup"] = False
+        
+
+
+def main():
+    st.write("### Debug: In main()")
+    if "show_signup" not in st.session_state:
+        st.session_state["show_signup"] = False
+
+    if st.session_state.get("login_success"):
+        st.write("### Debug: Login success detected in main()")
+        display_role_page()
+    elif st.session_state["show_signup"]:
+        signup()
+    else:
+        login()
+
+
+
+if __name__ == "__main__":
+    main()

@@ -15,3 +15,4 @@ class Product(BaseModel):
     date_created: Optional[str] = None  # date string, formatted as YYYY-MM-DD
     image_url: Optional[str] = None  # URL to product image if uploaded
     last_updated: Optional[datetime] = None
+    batch_id: Optional[str] = None  # ID of the batch this product belongs to
