@@ -1,56 +1,28 @@
 import streamlit as st
-from utils import view_products, add_distributor
+import requests
 
-def distributor_ui():
+API_URL = "http://127.0.0.1:8000"
+
+def distributor_ui(token):
     st.header("🚚 Distributor Dashboard")
+    headers = {"Authorization": f"Bearer {token}"}
 
-    action = st.selectbox("Choose an action", ["Assigned Products", "Update Product Location", "Product Trace View"])
-
-    if action == "Assigned Products":
-        st.subheader("📋 Assigned/Available Products List")
-
-        products = view_products()  # Replace with actual call to get assigned products
-        if products:
-            for p in products:
-                st.write(f"**{p['name']}** | ID: {p['id']} | Location: {p['location']}")
-        else:
-            st.info("No products assigned.")
-
-    elif action == "Update Product Location":
-        st.subheader("🛠️ Update Location")
-
-        # Fetch products to create the dropdown for product ID
-        products = view_products()  # Get the list of products
-        if products:
-            product_ids = [p['id'] for p in products]  # Extracting the product IDs for the dropdown
-            product_id = st.selectbox("Select Product ID", product_ids)  # Dropdown to select the product ID
-
-            # Once a product is selected, show the fields to enter new location and transport details
-            if product_id:
-                new_location = st.text_input("New Location")
-                transport_details = st.text_area("Transport Details")
-
-                if st.button("Update Location"):
-                    if not all([new_location, transport_details]):
-                        st.warning("Please fill in all fields.")
+    st.subheader("📦 My Products")
+    response = requests.get(f"{API_URL}/products", headers=headers)
+    if response.status_code == 200:
+        products = response.json()["products"]
+        for product in products:
+            st.write(f"**{product['name']}** - {product['productId']}")
+            with st.expander("Update Status"):
+                new_status = st.text_input("New Status", key=product['productId'])
+                note = st.text_input("Note", key=product['productId'] + "_note")
+                if st.button("Update", key=product['productId'] + "_update"):
+                    payload = {
+                        "status": new_status,
+                        "note": note
+                    }
+                    res = requests.put(f"{API_URL}/product/{product['productId']}", json=payload, headers=headers)
+                    if res.status_code == 200:
+                        st.success("Updated successfully")
                     else:
-                        result = add_distributor(product_id, new_location, transport_details)  # Replace with actual backend call
-                        if result["success"]:
-                            st.success("Location updated successfully!")
-                        else:
-                            st.error("Failed to update location.")
-        else:
-            st.info("No products found to update location.")
-
-    elif action == "Product Trace View":
-        st.subheader("📜 Product Trace View")
-
-        product_id = st.text_input("Product ID")
-
-        if st.button("View Trace"):
-            if product_id:
-                st.write(f"Trace for Product ID {product_id}:")
-                # Mock trace data
-                st.write("Origin: XYZ | Current Location: ABC | All roles involved")
-            else:
-                st.warning("Please provide a Product ID.")
+                        st.error("Update failed")

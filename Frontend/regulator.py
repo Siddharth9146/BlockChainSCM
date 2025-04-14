@@ -1,15 +1,15 @@
 import streamlit as st
+import requests
 
-def regulator_ui():
-    st.header("🕵️ Regulator Dashboard")
+API_URL = "http://127.0.0.1:8000"
 
-    product_id = st.text_input("Search Product by ID")
+def regulator_ui(token):
+    st.header("🛂 Regulator Dashboard")
+    headers = {"Authorization": f"Bearer {token}"}
 
-    if st.button("View Full Trace"):
-        if product_id:
-            st.write(f"Full Trace for Product ID {product_id}:")
-            st.write("Origin: XYZ | All roles involved: Producer, Distributor, Retailer")
-            st.write("Certification: Certified Organic")
-            st.write("Compliance Status: Approved")
-        else:
-            st.warning("Please provide a Product ID.")
+    st.subheader("📋 All Products")
+    response = requests.get(f"{API_URL}/products", headers=headers)
+    if response.status_code == 200:
+        for p in response.json()["products"]:
+            st.write(f"🔸 **{p['name']}** - ID: {p['productId']}")
+            st.write(f"Owner: {p['current_owner']} | Status: {p.get('status', 'N/A')}")

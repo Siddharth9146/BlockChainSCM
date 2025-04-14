@@ -1,35 +1,132 @@
-
 import streamlit as st
-from utils import send_post
+import requests
+from producer import producer_ui  # Import the producer_ui function
+from consumer import consumer_ui  # Import the consumer_ui function
 
-def login_section():
-    login_mode = st.radio("Choose Option", ["Login", "Register"])
+API_URL = "http://127.0.0.1:8000"  # Make sure the API URL is correct
 
-    with st.form(key="auth_form"):
-        name, phone = "", ""
-        if login_mode == "Register":
-            name = st.text_input("Name")
-            phone = st.text_input("Phone")
+def login():
+    st.title("🔐 Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    
+    if st.button("Login"):
+        # Call the backend login API
+        response = requests.post(f"{API_URL}/login", json={"username": username, "password": password})
 
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Submit")
+        # Debugging: Check if we got a response
+        st.write("Response status code:", response.status_code)
+        st.write("Response data:", response.json())
 
-        if submit:
-            if login_mode == "Register":
-                payload = {"name": name, "email": email, "password": password, "phone": phone, "role": st.session_state.role}
-                res = send_post("/register", payload)
-                if res.get("status") == "success":
-                    st.success("Registered successfully! You can now login.")
-                else:
-                    st.error(res.get("error", "Registration failed"))
+        if response.status_code == 200:
+            response_data = response.json()
+            st.write(response_data)  # Show the full response for debugging
+
+            if response_data.get("success"):
+                # Parse the necessary info
+                user_id = response_data.get("user_id")
+                role = response_data.get("role")
+                username = response_data.get("username")
+
+                # Store necessary information in session state
+                st.session_state["user_id"] = user_id
+                st.session_state["role"] = role
+                st.session_state["username"] = username
+                st.session_state["login_success"] = True  # Mark login as successful
+
+                st.success(f"Logged in successfully as {username}!")  # Show login success message
+
+                # Set a flag to force a page reload
+                st.session_state["role_page_displayed"] = False  # Reset flag for reloading the page
+                st.session_state["role_page_displayed"] = True  # Update flag to trigger page reload
+
+                st.write("### Debug: After successful login, session state is updated")
+                st.write(f"Session state after login: {st.session_state}")
+
             else:
-                payload = {"email": email, "password": password, "role": st.session_state.role}
-                res = send_post("/login", payload)
-                if res.get("authenticated"):
-                    st.session_state["authenticated"] = True
-                    st.session_state["name"] = res["name"]
-                    st.session_state["email"] = email
-                    st.success("Login successful!")
-                else:
-                    st.error("Login failed. Try again.")
+                st.error("Login failed. Invalid username or password.")
+        else:
+            st.error("Login failed. Server error.")
+
+def producer_page():
+    producer_ui()  # Display producer UI
+
+def consumer_page():
+    consumer_ui()  # Display consumer UI
+
+# Define functions for other roles (distributor_page, retailer_page, etc.)
+def distributor_page():
+    st.write("Distributor Page Placeholder")
+
+def retailer_page():
+    st.write("Retailer Page Placeholder")
+
+def regulator_page():
+    st.write("Regulator Page Placeholder")
+
+def display_role_page():
+    # Debugging: Confirm if this function is being called
+    st.write("### Debug: In display_role_page()")
+
+    role = st.session_state.get("role")
+    st.write(f"Session state: {st.session_state}")  # Show session state for debugging
+
+    if role == "producer":
+        producer_page()  # Show producer page
+    elif role == "consumer":
+        consumer_page()  # Show consumer page
+    elif role == "distributor":
+        distributor_page()  # Show distributor page
+    elif role == "retailer":
+        retailer_page()  # Show retailer page
+    elif role == "regulator":
+        regulator_page()  # Show regulator page
+    else:
+        st.error("Unknown role")
+
+def main():
+    # Debugging: Check session state and flow
+    st.write("### Debug: In main()")
+    st.write(f"Session state before check: {st.session_state}")  # Show session state for debugging
+
+    # Check if the 'login_success' is in session_state and is True
+    if "login_success" in st.session_state and st.session_state["login_success"]:
+        st.write("login success processing in main")
+        display_role_page()
+    else:
+        # If not logged in, show the login page
+        login()
+
+if __name__ == "__main__":
+    main()
+# Sign Up Function
+def signup():
+    st.title("📝 Sign Up")
+
+    username = st.text_input("Username")  # 1. username
+    password = st.text_input("Password", type="password")  # 2. password
+    role = st.selectbox("Role", ["producer", "distributor", "retailer", "consumer", "regulator"])  # 3. role
+    phone = st.text_input("Phone Number")  # 4. phone
+    email = st.text_input("Email")  # 5. email
+
+    if st.button("Register"):
+        if not username or not password or not role or not phone or not email:
+            st.warning("Please fill all the fields.")
+            return
+
+        payload = {
+            "username": username,
+            "password": password,
+            "role": role,
+            "phone": phone,
+            "email": email
+        }
+
+        response = requests.post(f"{API_URL}/register", json=payload)
+        if response.status_code == 201:
+            st.success("✅ User registered successfully. Please login.")
+        else:
+            try:
+                st.error(f"❌ {response.json().get('detail', 'Registration failed.')}")
+            except Exception:
+                st.error("❌ Registration failed. Invalid server response.")
