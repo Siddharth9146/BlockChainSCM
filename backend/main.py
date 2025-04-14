@@ -171,11 +171,7 @@ async def login(username: str = Body(...), password: str = Body(...)):
 @app.post("/product", status_code=status.HTTP_201_CREATED)
 async def add_product(product_data: Dict[str, Any] = Body(...), current_user: dict = Depends(get_current_user)):
     # Check if user has permission to add product
-    if current_user["role"].lower() != "producer":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only producers can add products"
-        )
+    
     
     # Generate product ID if not provided
     if "productId" not in product_data:
@@ -193,6 +189,8 @@ async def add_product(product_data: Dict[str, Any] = Body(...), current_user: di
                 product_data["name"],
                 current_user["username"],
                 product_data["quantity"],
+                product_data["batch_id"],
+                product_data["date_created"]
             ).transact({'from': account})
             
             # Wait for transaction receipt
@@ -214,7 +212,8 @@ async def add_product(product_data: Dict[str, Any] = Body(...), current_user: di
             "image_url": product_data.get("image_url", ""),
             "current_owner": current_user["username"],
             "status": "Produced",
-            "last_updated": datetime.utcnow()
+            "last_updated": datetime.utcnow(),
+            "batch_id": product_data.get("batch_id", ""),
         }
         
         result = products_collection.insert_one(product_dict)
