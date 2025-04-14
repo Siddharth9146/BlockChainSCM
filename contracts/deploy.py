@@ -67,11 +67,11 @@ def deploy_contract(compiled_sol):
     
     return tx_receipt.contractAddress
 
-if __name__ == "__main__":
-    print("Compiling the contract...")
-    compiled_sol = compile_contract()
+# if __name__ == "__main__":
+#     print("Compiling the contract...")
+#     compiled_sol = compile_contract()
 
-    print("Deploying the contract...")
-    contract_address = deploy_contract(compiled_sol)
+#     print("Deploying the contract...")
+#     contract_address = deploy_contract(compiled_sol)
 
-    print(f"Contract deployed at: {contract_address}")
+#     print(f"Contract deployed at: {contract_address}")
