@@ -37,7 +37,7 @@ def login():
                 st.success(f"Logged in successfully as {username}!")  # Show login success message
 
                 # Rerun the app to show role-specific page
-                st.rerun()  # Force a rerun to display the role-specific page
+                # st.rerun()  # Force a rerun to display the role-specific page
             else:
                 st.error("Login failed. Invalid username or password.")
         else:
@@ -81,8 +81,8 @@ def display_role_page():
 
 def main():
     # Debugging: Check session state and flow
-    st.write("### Debug: In main()")
-    st.write(f"Session state before check: {st.session_state}")  # Show session state for debugging
+    # st.write("### Debug: In main()")
+    # st.write(f"Session state before check: {st.session_state}")  # Show session state for debugging
 
     if "login_success" in st.session_state and st.session_state["login_success"]:
         # If user is logged in, show the role-specific page

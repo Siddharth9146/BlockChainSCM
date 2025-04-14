@@ -1,16 +1,20 @@
+import requests
 import streamlit as st
 from datetime import date
 from utils import add_product, add_distributor, view_products
 
+API_URL = "http://127.0.0.1:8000"  # Make sure the API URL is correct
+
 def producer_ui():
     st.header("👨‍🌾 Producer Dashboard")
 
+   
     action = st.selectbox("Choose an action", ["Add Product", "Add Distributor", "My Products List", "View Products"])
 
     if action == "Add Product":
         st.subheader("📦 Add Product")
 
-        product_name = st.text_input("Product Name")
+        name = st.text_input("Product Name")
         category = st.text_input("Category")
         quantity = st.number_input("Quantity", min_value=1, step=1)
         location = st.text_input("Location")
@@ -18,18 +22,31 @@ def producer_ui():
         st.markdown(f"**Date:** {today}")
 
         # Upload Image and Description
-        image = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+        image_url = st.text_input("Image URL")
         description = st.text_area("Product Description")
 
         if st.button("Add Product"):
-            if not all([product_name, category, quantity, location]):
+            if not all([name, category, quantity, location]):
                 st.warning("Please fill all required fields.")
             else:
-                result = add_product(product_name, category, quantity, location, str(today), image, description)
-                if result["success"]:
+                payload = {
+                    'name': name,
+                    'description': description,
+                    'category': category,
+                    'quantity': quantity,
+                    'location': location,
+                    'date': str(today),
+                    'image_url': image_url,
+                }
+                headers = {
+                    "Authorization": f"Bearer {token}"
+                }
+                response = requests.post(f"{API_URL}/product", json=payload, headers=headers)
+
+                if response.status_code == 201:
                     st.success("Product added successfully!")
                 else:
-                    st.error("Failed to add product.")
+                    st.error(f"Failed to add product: {response.json().get('detail', 'Unknown error')}")
 
     elif action == "Add Distributor":
         st.subheader("🚛 Add Distributor")
@@ -50,10 +67,17 @@ def producer_ui():
     elif action == "View Products":
         st.subheader("📋 View Products")
 
-        products = view_products()  # Replace with actual backend call
-        if products:
-            for p in products:
-                st.write(f"**{p['name']}**")
-                st.write(f"ID: {p['id']} | Date Created: {p['date_created']} | Status: {p['status']}")
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+        response = requests.get(f"{API_URL}/products", headers=headers)
+        if response.status_code == 200:
+            products = response.json().get("products", [])
+            if products:
+                for p in products:
+                    st.write(f"**{p['name']}**")
+                    st.write(f"ID: {p['productId']} | Date Created: {p['date_created']} | Status: {p['status']}")
+            else:
+                st.info("No products found.")
         else:
-            st.info("No products found.")
+            st.error("Failed to fetch products.")

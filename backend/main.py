@@ -191,7 +191,8 @@ async def add_product(product_data: Dict[str, Any] = Body(...), current_user: di
             tx_hash = contract.functions.addProduct(
                 product_data["productId"],
                 product_data["name"],
-                current_user["username"]
+                current_user["username"],
+                product_data["quantity"],
             ).transact({'from': account})
             
             # Wait for transaction receipt
@@ -275,6 +276,16 @@ async def add_distributor(distributor_data: Dict[str, Any] = Body(...), current_
             detail=f"Failed to add distributor: {str(e)}"
         )
 
+@app.get("/distributors")
+async def get_distributors():
+    
+    try:
+        # Fetch all users with role = distributor from the database
+        distributors = list(users_collection.find({"role": "distributor"}))
+        # Convert ObjectId to string for JSON serialization
+        distributor_names = [distributor["username"] for distributor in distributors]
+        return {"success": True, "distributors": distributor_names}
+    
 @app.put("/product/{product_id}")
 async def update_product(
     product_id: str,
