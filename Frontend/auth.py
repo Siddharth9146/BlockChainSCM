@@ -36,13 +36,8 @@ def login():
 
                 st.success(f"Logged in successfully as {username}!")  # Show login success message
 
-                # Set a flag to force a page reload
-                st.session_state["role_page_displayed"] = False  # Reset flag for reloading the page
-                st.session_state["role_page_displayed"] = True  # Update flag to trigger page reload
-
-                st.write("### Debug: After successful login, session state is updated")
-                st.write(f"Session state after login: {st.session_state}")
-
+                # Rerun the app to show role-specific page
+                st.rerun()  # Force a rerun to display the role-specific page
             else:
                 st.error("Login failed. Invalid username or password.")
         else:
@@ -89,8 +84,8 @@ def main():
     st.write("### Debug: In main()")
     st.write(f"Session state before check: {st.session_state}")  # Show session state for debugging
 
-    # Check if the 'login_success' is in session_state and is True
     if "login_success" in st.session_state and st.session_state["login_success"]:
+        # If user is logged in, show the role-specific page
         st.write("login success processing in main")
         display_role_page()
     else:
