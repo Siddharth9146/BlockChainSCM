@@ -278,14 +278,23 @@ async def add_distributor(distributor_data: Dict[str, Any] = Body(...), current_
 
 @app.get("/distributors")
 async def get_distributors():
-    
     try:
         # Fetch all users with role = distributor from the database
         distributors = list(users_collection.find({"role": "distributor"}))
-        # Convert ObjectId to string for JSON serialization
-        distributor_names = [distributor["username"] for distributor in distributors]
-        return {"success": True, "distributors": distributor_names}
-    
+        
+        # Extract usernames and IDs for JSON serialization
+        distributor_data = [
+            {"id": str(distributor["_id"]), "username": distributor["username"]}
+            for distributor in distributors
+        ]
+        
+        return {"success": True, "distributors": distributor_data}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve distributors: {str(e)}"
+        )
+
 @app.put("/product/{product_id}")
 async def update_product(
     product_id: str,
